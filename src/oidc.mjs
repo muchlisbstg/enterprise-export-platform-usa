@@ -14,7 +14,8 @@ export async function createOidcAuthenticator({ issuer, audience, fetchImpl = gl
   if (typeof fetchImpl !== "function") throw new Error("A fetch implementation is required");
 
   const issuerUrl = trustedUrl(issuer, "OIDC_ISSUER");
-  const discoveryUrl = new URL(`${issuerUrl.href.replace(/\\/$/, "")}/.well-known/openid-configuration`);
+  const issuerBase = issuerUrl.href.endsWith("/") ? issuerUrl.href.slice(0, -1) : issuerUrl.href;
+  const discoveryUrl = new URL(`${issuerBase}/.well-known/openid-configuration`);
   const response = await fetchImpl(discoveryUrl, { headers: { accept: "application/json" } });
   if (!response.ok) throw new Error("OIDC discovery request failed");
   const metadata = await response.json();
@@ -26,10 +27,10 @@ export async function createOidcAuthenticator({ issuer, audience, fetchImpl = gl
   return async function authenticate(req) {
     const header = req?.headers?.authorization;
     if (typeof header !== "string") return null;
-    const match = /^Bearer ([^\\s]+)$/i.exec(header);
-    if (!match) return null;
+    const parts = header.split(" ");
+    if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer" || !parts[1] || /\\s/.test(parts[1])) return null;
     try {
-      const { payload } = await jwtVerify(match[1], keySet, {
+      const { payload } = await jwtVerify(parts[1], keySet, {
         issuer,
         audience,
         algorithms: ["RS256", "ES256", "PS256", "EdDSA"]
