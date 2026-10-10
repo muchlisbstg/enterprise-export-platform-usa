@@ -36,8 +36,10 @@ jobs:
           test -s openapi/openapi.yaml
           test -s database/migrations/001_initial_order_foundation.sql
           test -s database/migrations/002_order_idempotency.sql
+          test -s database/migrations/003_identity_authorization_foundation.sql
           test -s docs/ARCHITECTURE.md
           test -s docs/MVP_BACKLOG.md
+          test -s docs/IDENTITY_AND_AUTHORIZATION_FOUNDATION.md
           test -s src/server.mjs
           test -s src/app.mjs
           test -s test/app.test.mjs
@@ -54,10 +56,13 @@ jobs:
         run: |
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/001_initial_order_foundation.sql
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/002_order_idempotency.sql
+          psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/003_identity_authorization_foundation.sql
       - name: Run PostgreSQL-backed order integration tests
         run: DATABASE_URL=postgresql://app:test-only-password@localhost:5432/export_platform_test npm run test:integration
       - name: Verify expected tables and tenant-scoped constraints
         run: |
-          psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.organizations'), to_regclass('public.parties'), to_regclass('public.products'), to_regclass('public.orders'), to_regclass('public.order_lines'), to_regclass('public.audit_events'), to_regclass('public.order_idempotency_keys');" | tee /tmp/schema-check.txt
+          psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.organizations'), to_regclass('public.parties'), to_regclass('public.products'), to_regclass('public.orders'), to_regclass('public.order_lines'), to_regclass('public.audit_events'), to_regclass('public.order_idempotency_keys'), to_regclass('public.app_users'), to_regclass('public.organization_memberships'), to_regclass('public.authorization_roles'), to_regclass('public.authorization_permissions'), to_regclass('public.authorization_role_permissions'), to_regclass('public.organization_membership_roles');" | tee /tmp/schema-check.txt
           grep -q "audit_events" /tmp/schema-check.txt
+          grep -q "app_users" /tmp/schema-check.txt
+          grep -q "organization_membership_roles" /tmp/schema-check.txt
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -c "SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_type = 'FOREIGN KEY' AND table_schema = 'public';" | grep -Eq '[1-9][0-9]*'
