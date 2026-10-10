@@ -44,6 +44,7 @@ jobs:
           test -s src/app.mjs
           test -s test/app.test.mjs
           test -s test/order.integration.test.mjs
+          test -s test/identity.integration.test.mjs
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -59,6 +60,8 @@ jobs:
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/003_identity_authorization_foundation.sql
       - name: Run PostgreSQL-backed order integration tests
         run: DATABASE_URL=postgresql://app:test-only-password@localhost:5432/export_platform_test npm run test:integration
+      - name: Run identity schema integration tests
+        run: DATABASE_URL=postgresql://app:test-only-password@localhost:5432/export_platform_test node --test test/identity.integration.test.mjs
       - name: Verify expected tables and tenant-scoped constraints
         run: |
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.organizations'), to_regclass('public.parties'), to_regclass('public.products'), to_regclass('public.orders'), to_regclass('public.order_lines'), to_regclass('public.audit_events'), to_regclass('public.order_idempotency_keys'), to_regclass('public.app_users'), to_regclass('public.organization_memberships'), to_regclass('public.authorization_roles'), to_regclass('public.authorization_permissions'), to_regclass('public.authorization_role_permissions'), to_regclass('public.organization_membership_roles');" | tee /tmp/schema-check.txt
