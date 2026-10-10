@@ -38,6 +38,7 @@ jobs:
           test -s database/migrations/002_order_idempotency.sql
           test -s database/migrations/003_identity_authorization_foundation.sql
           test -s database/migrations/004_authorization_catalog.sql
+          test -s database/migrations/005_order_transition_audit.sql
           test -s docs/ARCHITECTURE.md
           test -s docs/MVP_BACKLOG.md
           test -s docs/IDENTITY_AND_AUTHORIZATION_FOUNDATION.md
@@ -52,6 +53,9 @@ jobs:
           test -s test/order.integration.test.mjs
           test -s test/identity.integration.test.mjs
           test -s test/authorization-catalog.integration.test.mjs
+          test -s test/order-transition.integration.test.mjs
+          test -s src/order-transition-service.mjs
+          test -s src/order-lifecycle.mjs
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -66,12 +70,15 @@ jobs:
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/002_order_idempotency.sql
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/003_identity_authorization_foundation.sql
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/004_authorization_catalog.sql
+          psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/005_order_transition_audit.sql
       - name: Run PostgreSQL-backed order integration tests
         run: DATABASE_URL=postgresql://app:test-only-password@localhost:5432/export_platform_test npm run test:integration
       - name: Run identity schema integration tests
         run: DATABASE_URL=postgresql://app:test-only-password@localhost:5432/export_platform_test node --test test/identity.integration.test.mjs
       - name: Run authorization catalog integration tests
         run: DATABASE_URL=postgresql://app:test-only-password@localhost:5432/export_platform_test node --test test/authorization-catalog.integration.test.mjs
+      - name: Run order transition integration tests
+        run: DATABASE_URL=postgresql://app:test-only-password@localhost:5432/export_platform_test node --test test/order-transition.integration.test.mjs
       - name: Verify expected tables and tenant-scoped constraints
         run: |
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.organizations'), to_regclass('public.parties'), to_regclass('public.products'), to_regclass('public.orders'), to_regclass('public.order_lines'), to_regclass('public.audit_events'), to_regclass('public.order_idempotency_keys'), to_regclass('public.app_users'), to_regclass('public.organization_memberships'), to_regclass('public.authorization_roles'), to_regclass('public.authorization_permissions'), to_regclass('public.authorization_role_permissions'), to_regclass('public.organization_membership_roles');" | tee /tmp/schema-check.txt

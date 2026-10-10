@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { transitionOrder } from "./order-transition-service.mjs";
 
 const allowedOrderStatuses = new Set([
   "draft", "submitted", "approved", "rejected", "cancelled", "fulfilled"
@@ -97,6 +98,7 @@ export function createHandler({ pool, token, organizationId, authenticate, resol
     }
 
     let requestOrganizationId = organizationId;
+    let requestActorId = null;
     let permissions = new Set(["products:read", "parties:read", "orders:read", "orders:create"]);
     if (typeof authenticate === "function") {
       let claims;
@@ -110,6 +112,7 @@ export function createHandler({ pool, token, organizationId, authenticate, resol
       try { principal = await resolvePrincipal(pool, claims, requestedOrganizationId); } catch { principal = null; }
       if (!principal) return sendJson(res, 403, { code: "FORBIDDEN", message: "Organization membership is not active or access is denied", correlationId });
       requestOrganizationId = principal.organizationId;
+      requestActorId = principal.userId;
       permissions = new Set(principal.permissions);
     } else {
       const authorization = req.headers.authorization ?? "";
@@ -118,7 +121,10 @@ export function createHandler({ pool, token, organizationId, authenticate, resol
       }
     }
 
-    const requiredPermission =
+    const transitionSegments = url.pathname.split("/");
+    const transitionMatch = transitionSegments.length === 6 && transitionSegments[1] === "api" && transitionSegments[2] === "v1" && transitionSegments[3] === "orders" && UUID_RE.test(transitionSegments[4]) && ["submit", "approve", "reject", "cancel", "fulfil"].includes(transitionSegments[5]) ? [null, transitionSegments[4], transitionSegments[5]] : null;
+    const transitionPermissions = { submit: "order:submit", approve: "order:approve", reject: "order:reject", cancel: "order:cancel", fulfil: "order:fulfil" };
+    const requiredPermission = transitionMatch ? transitionPermissions[transitionMatch[2]] :
       req.method === "GET" && url.pathname === "/api/v1/products" ? "products:read" :
       req.method === "GET" && url.pathname === "/api/v1/parties" ? "parties:read" :
       req.method === "GET" && url.pathname === "/api/v1/orders" ? "orders:read" :
@@ -185,6 +191,36 @@ export function createHandler({ pool, token, organizationId, authenticate, resol
           [requestOrganizationId, status, limit]
         );
         return sendJson(res, 200, { items: result.rows, nextCursor: null });
+      }
+
+      if (req.method === "POST" && transitionMatch) {
+        if (!requestActorId) return sendJson(res, 403, { code: "FORBIDDEN", message: "A verified user identity is required", correlationId });
+        let reason = null;
+        const action = transitionMatch[2];
+        if (action === "reject" || action === "cancel") {
+          const contentType = req.headers["content-type"] ?? "";
+          if (!contentType.toLowerCase().startsWith("application/json")) {
+            return sendJson(res, 415, { code: "UNSUPPORTED_MEDIA_TYPE", message: "Content-Type must be application/json", correlationId });
+          }
+          let body;
+          try { body = await readJson(req); }
+          catch { return sendJson(res, 400, { code: "INVALID_JSON", message: "Request body must be valid JSON", correlationId }); }
+          if (!body || typeof body !== "object" || Array.isArray(body)) {
+            return sendJson(res, 400, { code: "VALIDATION_ERROR", message: "Body must be a JSON object", correlationId });
+          }
+          reason = body.reason;
+        }
+        const result = await transitionOrder({
+          pool,
+          actor: { id: requestActorId, organizationId: requestOrganizationId, permissions: [...permissions] },
+          organizationId: requestOrganizationId,
+          orderId: transitionMatch[1],
+          action,
+          reason,
+          idempotencyKey: req.headers["idempotency-key"],
+          correlationId
+        });
+        return sendJson(res, result.status, result.body, result.headers ?? {});
       }
 
       if (req.method === "POST" && url.pathname === "/api/v1/orders") {
@@ -267,10 +303,10 @@ export function createHandler({ pool, token, organizationId, authenticate, resol
           }
 
           const inserted = await client.query(
-            `INSERT INTO orders (organization_id, customer_party_id, order_number, status, currency, notes)
-             VALUES ($1, $2, $3, 'draft', $4, $5)
-             RETURNING id, status, order_number AS "orderNumber", customer_party_id AS "customerPartyId", currency, notes, created_at AS "createdAt"`,
-            [requestOrganizationId, body.customerPartyId, body.orderNumber.trim(), body.currency, body.notes ?? null]
+            `INSERT INTO orders (organization_id, customer_party_id, order_number, status, currency, notes, created_by)
+             VALUES ($1, $2, $3, 'draft', $4, $5, $6)
+             RETURNING id, status, order_number AS "orderNumber", customer_party_id AS "customerPartyId", currency, notes, created_by AS "createdBy", created_at AS "createdAt"`,
+            [requestOrganizationId, body.customerPartyId, body.orderNumber.trim(), body.currency, body.notes ?? null, requestActorId]
           );
           const order = inserted.rows[0];
           const lines = [];
