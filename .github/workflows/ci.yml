@@ -35,6 +35,7 @@ jobs:
         run: |
           test -s openapi/openapi.yaml
           test -s database/migrations/001_initial_order_foundation.sql
+          test -s database/migrations/002_order_idempotency.sql
           test -s docs/ARCHITECTURE.md
           test -s docs/MVP_BACKLOG.md
           test -s src/server.mjs
@@ -51,8 +52,9 @@ jobs:
       - name: Apply migration to disposable PostgreSQL
         run: |
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/001_initial_order_foundation.sql
+          psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/002_order_idempotency.sql
       - name: Verify expected tables and tenant-scoped constraints
         run: |
-          psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.organizations'), to_regclass('public.parties'), to_regclass('public.products'), to_regclass('public.orders'), to_regclass('public.order_lines'), to_regclass('public.audit_events');" | tee /tmp/schema-check.txt
+          psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.organizations'), to_regclass('public.parties'), to_regclass('public.products'), to_regclass('public.orders'), to_regclass('public.order_lines'), to_regclass('public.audit_events'), to_regclass('public.order_idempotency_keys');" | tee /tmp/schema-check.txt
           grep -q "audit_events" /tmp/schema-check.txt
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -c "SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_type = 'FOREIGN KEY' AND table_schema = 'public';" | grep -Eq '[1-9][0-9]*'
