@@ -41,6 +41,7 @@ jobs:
           test -s src/server.mjs
           test -s src/app.mjs
           test -s test/app.test.mjs
+          test -s test/order.integration.test.mjs
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -49,10 +50,12 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Run API unit tests
         run: npm test
-      - name: Apply migration to disposable PostgreSQL
+      - name: Apply migrations to disposable PostgreSQL
         run: |
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/001_initial_order_foundation.sql
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/002_order_idempotency.sql
+      - name: Run PostgreSQL-backed order integration tests
+        run: DATABASE_URL=postgresql://app:test-only-password@localhost:5432/export_platform_test npm run test:integration
       - name: Verify expected tables and tenant-scoped constraints
         run: |
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.organizations'), to_regclass('public.parties'), to_regclass('public.products'), to_regclass('public.orders'), to_regclass('public.order_lines'), to_regclass('public.audit_events'), to_regclass('public.order_idempotency_keys');" | tee /tmp/schema-check.txt
