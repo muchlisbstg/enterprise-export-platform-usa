@@ -113,7 +113,7 @@ test("PostgreSQL order creation is tenant-scoped and idempotent", { skip: !enabl
     );
     assert.deepEqual(counts.rows[0], { orders: 1, lines: 1, audit_events: 1, idempotency_records: 1 });
   } finally {
-    if (server) await new Promise(resolve => server.close(error => error ? reject(error) : resolve()));
+    if (server) await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     if (orgA) {
       await pool.query("DELETE FROM order_idempotency_keys WHERE organization_id = $1", [orgA]);
       await pool.query("DELETE FROM audit_events WHERE organization_id = $1", [orgA]);
