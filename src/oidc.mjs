@@ -28,7 +28,7 @@ export async function createOidcAuthenticator({ issuer, audience, fetchImpl = gl
     const header = req?.headers?.authorization;
     if (typeof header !== "string") return null;
     const parts = header.split(" ");
-    if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer" || !parts[1] || /\\s/.test(parts[1])) return null;
+    if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer" || !parts[1] || Array.from(parts[1]).some(character => character.charCodeAt(0) <= 32 || character.charCodeAt(0) === 127)) return null;
     try {
       const { payload } = await jwtVerify(parts[1], keySet, {
         issuer,
