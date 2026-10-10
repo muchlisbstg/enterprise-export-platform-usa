@@ -106,7 +106,7 @@ paths:
         - in: header
           name: Idempotency-Key
           required: true
-          schema: { type: string, minLength: 16, maxLength: 128 }
+          schema: { type: string, minLength: 8, maxLength: 200 }
       requestBody:
         required: true
         content:
@@ -119,15 +119,18 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Order'
+                $ref: '#/components/schemas/CreateOrderResponse'
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
-          description: Idempotency conflict or invalid state
+          description: Idempotency conflict or duplicate order number
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '413': { description: Request body exceeds the size limit }
+        '415': { description: Content-Type must be application/json }
+        '422': { description: Customer or product validation failed }
 components:
   securitySchemes:
     bearerAuth:
@@ -179,18 +182,158 @@ components:
         active: { type: boolean }
     OrderLineInput:
       type: object
-      required: [productId, quantity, unitPrice, currency]
+      required: [productId, quantity, unitPrice]
       properties:
         productId: { type: string, format: uuid }
-        quantity: { type: number, exclusiveMinimum: 0 }
-        unitPrice: { type: number, minimum: 0 }
-        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        quantity: { type: number, exclusiveMinimum: 0, multipleOf: 0.0001 }
+        unitPrice: { type: number, minimum: 0, multipleOf: 0.0001 }
     CreateOrder:
       type: object
-      required: [customerPartyId, currency, lines]
+      required: [customerPartyId, orderNumber, currency, lines]
       properties:
         customerPartyId: { type: string, format: uuid }
+        orderNumber: { type: string, minLength: 1, maxLength: 80 }
+        currency: { type: string, pattern: '^[A-Z]{3}
+        notes: { type: [string, 'null'], maxLength: 2000 }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: { $ref: '#/components/schemas/OrderLineInput' }
+    CreateOrderResponse:
+      type: object
+      required: [item, correlationId]
+      properties:
+        correlationId: { type: string, format: uuid }
+        item:
+          type: object
+          required: [id, status, orderNumber, customerPartyId, currency, lines]
+          properties:
+            id: { type: string, format: uuid }
+            status: { type: string, const: draft }
+            orderNumber: { type: string }
+            customerPartyId: { type: string, format: uuid }
+            currency: { type: string, pattern: '^[A-Z]{3}
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [draft, submitted, approved, rejected, cancelled, fulfilled] }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [productId, quantity, unitPrice]
+            properties:
+              productId: { type: string, format: uuid }
+              quantity: { type: number, exclusiveMinimum: 0 }
+              unitPrice: { type: number, minimum: 0 }
+    ProductPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Product' } }
+        nextCursor: { type: [string, 'null'] }
+    PartyPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Party' } }
+        nextCursor: { type: [string, 'null'] }
+    OrderPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Order' } }
+        nextCursor: { type: [string, 'null'] }
+ }
+        notes: { type: [string, 'null'], maxLength: 2000 }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { $ref: '#/components/schemas/OrderLineInput' }
+    Order:
+      type: object
+      required: [id, status, currency, lines]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [draft, submitted, approved, rejected, cancelled, fulfilled] }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [productId, quantity, unitPrice]
+            properties:
+              productId: { type: string, format: uuid }
+              quantity: { type: number, exclusiveMinimum: 0 }
+              unitPrice: { type: number, minimum: 0 }
+    ProductPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Product' } }
+        nextCursor: { type: [string, 'null'] }
+    PartyPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Party' } }
+        nextCursor: { type: [string, 'null'] }
+    OrderPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Order' } }
+        nextCursor: { type: [string, 'null'] }
+ }
+            notes: { type: [string, 'null'] }
+            createdAt: { type: string, format: date-time }
+            lines:
+              type: array
+              items:
+                type: object
+                required: [productId, quantity, unitPrice, lineNumber]
+                properties:
+                  productId: { type: string, format: uuid }
+                  quantity: { type: string }
+                  unitPrice: { type: string }
+                  lineNumber: { type: integer, minimum: 1 }
+    Order:
+      type: object
+      required: [id, status, currency, lines]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [draft, submitted, approved, rejected, cancelled, fulfilled] }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        lines:
+          type: array
+          items:
+            type: object
+            required: [productId, quantity, unitPrice]
+            properties:
+              productId: { type: string, format: uuid }
+              quantity: { type: number, exclusiveMinimum: 0 }
+              unitPrice: { type: number, minimum: 0 }
+    ProductPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Product' } }
+        nextCursor: { type: [string, 'null'] }
+    PartyPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Party' } }
+        nextCursor: { type: [string, 'null'] }
+    OrderPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Order' } }
+        nextCursor: { type: [string, 'null'] }
+ }
         notes: { type: [string, 'null'], maxLength: 2000 }
         lines:
           type: array

@@ -74,3 +74,30 @@ test("database errors return a safe error response", async () => {
     assert.doesNotMatch(body, /sensitive database detail/);
   });
 });
+
+test("order creation requires an idempotency key", async () => {
+  const pool = { query: async () => { throw new Error("should not query"); }, connect: async () => { throw new Error("should not connect"); } };
+  await withServer(pool, async base => {
+    const response = await fetch(base + "/api/v1/orders", { method: "POST", headers: { authorization: "Bearer " + TOKEN, "content-type": "application/json" }, body: JSON.stringify({}) });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).code, "IDEMPOTENCY_KEY_REQUIRED");
+  });
+});
+
+test("order creation rejects unsupported media types", async () => {
+  const pool = { query: async () => { throw new Error("should not query"); }, connect: async () => { throw new Error("should not connect"); } };
+  await withServer(pool, async base => {
+    const response = await fetch(base + "/api/v1/orders", { method: "POST", headers: { authorization: "Bearer " + TOKEN, "idempotency-key": "test-key-0001", "content-type": "text/plain" }, body: "{}" });
+    assert.equal(response.status, 415);
+    assert.equal((await response.json()).code, "UNSUPPORTED_MEDIA_TYPE");
+  });
+});
+
+test("order creation validates lines before opening a transaction", async () => {
+  const pool = { query: async () => { throw new Error("should not query"); }, connect: async () => { throw new Error("should not connect"); } };
+  await withServer(pool, async base => {
+    const response = await fetch(base + "/api/v1/orders", { method: "POST", headers: { authorization: "Bearer " + TOKEN, "idempotency-key": "test-key-0002", "content-type": "application/json" }, body: JSON.stringify({ customerPartyId: "00000000-0000-4000-8000-000000000001", orderNumber: "ORD-TEST", currency: "USD", lines: [] }) });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).code, "VALIDATION_ERROR");
+  });
+});
