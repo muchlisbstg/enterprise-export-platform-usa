@@ -75,10 +75,14 @@ function orderRequestHash(body) {
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
-export function createHandler({ pool, token, organizationId }) {
+export function createHandler({ pool, token, organizationId, authenticate, resolvePrincipal }) {
   if (!pool || typeof pool.query !== "function") throw new Error("A database pool is required");
-  if (!token || token.length < 24) throw new Error("API_BEARER_TOKEN must contain at least 24 characters");
-  if (!organizationId) throw new Error("DEFAULT_ORGANIZATION_ID is required");
+  if (typeof authenticate === "function") {
+    if (typeof resolvePrincipal !== "function") throw new Error("A principal resolver is required with OIDC authentication");
+  } else {
+    if (!token || token.length < 24) throw new Error("API_BEARER_TOKEN must contain at least 24 characters in test/legacy mode");
+    if (!organizationId) throw new Error("DEFAULT_ORGANIZATION_ID is required in test/legacy mode");
+  }
 
   return async function handler(req, res) {
     const correlationId = randomUUID();
@@ -92,9 +96,35 @@ export function createHandler({ pool, token, organizationId }) {
       return sendJson(res, 404, { code: "NOT_FOUND", message: "Route not found", correlationId });
     }
 
-    const authorization = req.headers.authorization ?? "";
-    if (authorization !== `Bearer ${token}`) {
-      return sendJson(res, 401, { code: "UNAUTHORIZED", message: "Missing or invalid bearer token", correlationId });
+    let requestOrganizationId = organizationId;
+    let permissions = new Set(["products:read", "parties:read", "orders:read", "orders:create"]);
+    if (typeof authenticate === "function") {
+      let claims;
+      try { claims = await authenticate(req); } catch { claims = null; }
+      if (!claims) return sendJson(res, 401, { code: "UNAUTHORIZED", message: "Missing or invalid access token", correlationId });
+      const requestedOrganizationId = req.headers["x-organization-id"];
+      if (typeof requestedOrganizationId !== "string" || !UUID_RE.test(requestedOrganizationId)) {
+        return sendJson(res, 400, { code: "ORGANIZATION_REQUIRED", message: "Provide a valid X-Organization-Id", correlationId });
+      }
+      let principal;
+      try { principal = await resolvePrincipal(pool, claims, requestedOrganizationId); } catch { principal = null; }
+      if (!principal) return sendJson(res, 403, { code: "FORBIDDEN", message: "Organization membership is not active or access is denied", correlationId });
+      requestOrganizationId = principal.organizationId;
+      permissions = new Set(principal.permissions);
+    } else {
+      const authorization = req.headers.authorization ?? "";
+      if (authorization !== `Bearer ${token}`) {
+        return sendJson(res, 401, { code: "UNAUTHORIZED", message: "Missing or invalid bearer token", correlationId });
+      }
+    }
+
+    const requiredPermission =
+      req.method === "GET" && url.pathname === "/api/v1/products" ? "products:read" :
+      req.method === "GET" && url.pathname === "/api/v1/parties" ? "parties:read" :
+      req.method === "GET" && url.pathname === "/api/v1/orders" ? "orders:read" :
+      req.method === "POST" && url.pathname === "/api/v1/orders" ? "orders:create" : null;
+    if (requiredPermission && !permissions.has(requiredPermission)) {
+      return sendJson(res, 403, { code: "FORBIDDEN", message: "Required permission is missing", correlationId });
     }
 
     const limit = parseLimit(url.searchParams.get("limit"));
@@ -110,7 +140,7 @@ export function createHandler({ pool, token, organizationId }) {
            WHERE organization_id = $1 AND active = true
            ORDER BY name, id
            LIMIT $2`,
-          [organizationId, limit]
+          [requestOrganizationId, limit]
         );
         return sendJson(res, 200, { items: result.rows, nextCursor: null });
       }
@@ -127,7 +157,7 @@ export function createHandler({ pool, token, organizationId }) {
              AND ($2::text IS NULL OR kind = $2 OR kind = 'both')
            ORDER BY legal_name, id
            LIMIT $3`,
-          [organizationId, kind, limit]
+          [requestOrganizationId, kind, limit]
         );
         return sendJson(res, 200, { items: result.rows, nextCursor: null });
       }
@@ -152,7 +182,7 @@ export function createHandler({ pool, token, organizationId }) {
            GROUP BY o.id
            ORDER BY o.created_at DESC, o.id
            LIMIT $3`,
-          [organizationId, status, limit]
+          [requestOrganizationId, status, limit]
         );
         return sendJson(res, 200, { items: result.rows, nextCursor: null });
       }
@@ -191,7 +221,7 @@ export function createHandler({ pool, token, organizationId }) {
              VALUES ($1, $2, $3)
              ON CONFLICT (organization_id, idempotency_key) DO NOTHING
              RETURNING idempotency_key`,
-            [organizationId, idempotencyKey, requestHash]
+            [requestOrganizationId, idempotencyKey, requestHash]
           );
 
           if (reservation.rowCount === 0) {
@@ -200,7 +230,7 @@ export function createHandler({ pool, token, organizationId }) {
                FROM order_idempotency_keys
                WHERE organization_id = $1 AND idempotency_key = $2
                FOR UPDATE`,
-              [organizationId, idempotencyKey]
+              [requestOrganizationId, idempotencyKey]
             );
             const record = previous.rows[0];
             if (!record || record.request_hash !== requestHash) {
@@ -218,7 +248,7 @@ export function createHandler({ pool, token, organizationId }) {
           const customer = await client.query(
             `SELECT id FROM parties
              WHERE organization_id = $1 AND id = $2 AND active = true AND kind IN ('customer', 'both')`,
-            [organizationId, body.customerPartyId]
+            [requestOrganizationId, body.customerPartyId]
           );
           if (customer.rowCount !== 1) {
             await client.query("ROLLBACK");
@@ -229,7 +259,7 @@ export function createHandler({ pool, token, organizationId }) {
           const products = await client.query(
             `SELECT id FROM products
              WHERE organization_id = $1 AND active = true AND id = ANY($2::uuid[])`,
-            [organizationId, productIds]
+            [requestOrganizationId, productIds]
           );
           if (products.rowCount !== productIds.length) {
             await client.query("ROLLBACK");
@@ -240,7 +270,7 @@ export function createHandler({ pool, token, organizationId }) {
             `INSERT INTO orders (organization_id, customer_party_id, order_number, status, currency, notes)
              VALUES ($1, $2, $3, 'draft', $4, $5)
              RETURNING id, status, order_number AS "orderNumber", customer_party_id AS "customerPartyId", currency, notes, created_at AS "createdAt"`,
-            [organizationId, body.customerPartyId, body.orderNumber.trim(), body.currency, body.notes ?? null]
+            [requestOrganizationId, body.customerPartyId, body.orderNumber.trim(), body.currency, body.notes ?? null]
           );
           const order = inserted.rows[0];
           const lines = [];
@@ -249,7 +279,7 @@ export function createHandler({ pool, token, organizationId }) {
               `INSERT INTO order_lines (organization_id, order_id, line_number, product_id, quantity, unit_price)
                VALUES ($1, $2, $3, $4, $5, $6)
                RETURNING product_id AS "productId", quantity::text AS quantity, unit_price::text AS "unitPrice", line_number AS "lineNumber"`,
-              [organizationId, order.id, index + 1, line.productId, line.quantity, line.unitPrice]
+              [requestOrganizationId, order.id, index + 1, line.productId, line.quantity, line.unitPrice]
             );
             lines.push(result.rows[0]);
           }
@@ -257,14 +287,14 @@ export function createHandler({ pool, token, organizationId }) {
           await client.query(
             `INSERT INTO audit_events (organization_id, correlation_id, subject_type, subject_id, action, decision, evidence_refs)
              VALUES ($1, $2, 'order', $3, 'order.created', 'allowed', '[]'::jsonb)`,
-            [organizationId, correlationId, order.id]
+            [requestOrganizationId, correlationId, order.id]
           );
           const responseBody = { item: { ...order, lines }, correlationId };
           await client.query(
             `UPDATE order_idempotency_keys
              SET response_status = 201, response_body = $3::jsonb, completed_at = now()
              WHERE organization_id = $1 AND idempotency_key = $2`,
-            [organizationId, idempotencyKey, JSON.stringify(responseBody)]
+            [requestOrganizationId, idempotencyKey, JSON.stringify(responseBody)]
           );
           await client.query("COMMIT");
           return sendJson(res, 201, responseBody, { location: `/api/v1/orders/${order.id}` });

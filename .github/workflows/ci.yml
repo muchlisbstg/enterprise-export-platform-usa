@@ -42,6 +42,11 @@ jobs:
           test -s docs/IDENTITY_AND_AUTHORIZATION_FOUNDATION.md
           test -s src/server.mjs
           test -s src/app.mjs
+          test -s src/oidc.mjs
+          test -s src/authorization.mjs
+          test -s test/oidc.test.mjs
+          test -s test/authorization.test.mjs
+          test -s test/oidc-app.test.mjs
           test -s test/app.test.mjs
           test -s test/order.integration.test.mjs
           test -s test/identity.integration.test.mjs
