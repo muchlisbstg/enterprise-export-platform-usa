@@ -37,6 +37,17 @@ jobs:
           test -s database/migrations/001_initial_order_foundation.sql
           test -s docs/ARCHITECTURE.md
           test -s docs/MVP_BACKLOG.md
+          test -s src/server.mjs
+          test -s src/app.mjs
+          test -s test/app.test.mjs
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install API dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run API unit tests
+        run: npm test
       - name: Apply migration to disposable PostgreSQL
         run: |
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/001_initial_order_foundation.sql
