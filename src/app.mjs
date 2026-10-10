@@ -121,7 +121,8 @@ export function createHandler({ pool, token, organizationId, authenticate, resol
       }
     }
 
-    const transitionMatch = /^\\/api\\/v1\\/orders\\/([0-9a-f-]{36})\\/(submit|approve|reject|cancel|fulfil)$/.exec(url.pathname);
+    const transitionSegments = url.pathname.split("/");
+    const transitionMatch = transitionSegments.length === 6 && transitionSegments[1] === "api" && transitionSegments[2] === "v1" && transitionSegments[3] === "orders" && UUID_RE.test(transitionSegments[4]) && ["submit", "approve", "reject", "cancel", "fulfil"].includes(transitionSegments[5]) ? [null, transitionSegments[4], transitionSegments[5]] : null;
     const transitionPermissions = { submit: "order:submit", approve: "order:approve", reject: "order:reject", cancel: "order:cancel", fulfil: "order:fulfil" };
     const requiredPermission = transitionMatch ? transitionPermissions[transitionMatch[2]] :
       req.method === "GET" && url.pathname === "/api/v1/products" ? "products:read" :
