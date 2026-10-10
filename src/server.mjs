@@ -1,16 +1,20 @@
 import { createServer } from "node:http";
 import pg from "pg";
 import { createHandler } from "./app.mjs";
+import { createOidcAuthenticator } from "./oidc.mjs";
+import { resolveOrganizationPrincipal } from "./authorization.mjs";
 
 const { Pool } = pg;
 const port = Number(process.env.PORT ?? 8080);
 const databaseUrl = process.env.DATABASE_URL;
-const token = process.env.API_BEARER_TOKEN;
-const organizationId = process.env.DEFAULT_ORGANIZATION_ID;
+const issuer = process.env.OIDC_ISSUER;
+const audience = process.env.OIDC_AUDIENCE;
 
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
-if (!token || token.length < 24) throw new Error("Set API_BEARER_TOKEN to a secret of at least 24 characters");
-if (!organizationId) throw new Error("DEFAULT_ORGANIZATION_ID is required");
+if (!issuer) throw new Error("OIDC_ISSUER is required; shared bearer-token fallback is disabled");
+if (!audience) throw new Error("OIDC_AUDIENCE is required; shared bearer-token fallback is disabled");
+
+const authenticate = await createOidcAuthenticator({ issuer, audience });
 
 const pool = new Pool({
   connectionString: databaseUrl,
@@ -20,7 +24,11 @@ const pool = new Pool({
   application_name: "enterprise-export-platform-api"
 });
 
-const server = createServer(createHandler({ pool, token, organizationId }));
+const server = createServer(createHandler({
+  pool,
+  authenticate,
+  resolvePrincipal: resolveOrganizationPrincipal
+}));
 server.requestTimeout = 10000;
 server.headersTimeout = 12000;
 
