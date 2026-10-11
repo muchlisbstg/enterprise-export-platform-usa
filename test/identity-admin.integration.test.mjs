@@ -108,7 +108,9 @@ test("identity role administration persists grant/revoke, idempotency, tenant bo
     ]);
     assert.deepEqual(concurrentResults.map((result) => result.status), [200, 200]);
     assert.equal(concurrentResults.filter((result) => result.headers?.["idempotency-replayed"] === "true").length, 1);
-    assert.equal(concurrentResults.filter((result) => result.body.item.changed === true).length, 1);
+    // Idempotent replays return the original response body, so both responses may report changed=true.
+    // Verify response equivalence here; the database audit count below proves only one request was applied.
+    assert.deepEqual(concurrentResults[0].body, concurrentResults[1].body);
     const concurrentAudit = await pool.query(
       "SELECT count(*)::int AS count FROM identity_audit_events WHERE organization_id = $1 AND request_key = $2",
       [orgA, concurrentKey]
