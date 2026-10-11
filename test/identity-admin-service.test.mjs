@@ -12,7 +12,7 @@ function createPool({ queries = [], failAt = null } = {}) {
       if (String(sql).includes("INSERT INTO identity_admin_idempotency_keys") && String(sql).includes("ON CONFLICT")) return { rowCount: 1, rows: [{ idempotency_key: params[1] }] };
       if (String(sql).includes("SELECT request_hash")) return { rowCount: 0, rows: [] };
       if (String(sql).includes("SELECT m.user_id")) return { rowCount: 1, rows: [{ userId: params[1], status: "active" }] };
-      if (String(sql).includes("SELECT role_key")) return { rowCount: 1, rows: [{ role_key: params[2], managed_by: "system" }] };
+      if (String(sql).includes("SELECT role_key")) return { rowCount: 1, rows: [{ role_key: params[0], managed_by: "system" }] };
       if (String(sql).includes("INSERT INTO organization_membership_roles")) return { rowCount: 1, rows: [] };
       if (String(sql).includes("DELETE FROM organization_membership_roles")) return { rowCount: 1, rows: [] };
       if (String(sql).includes("UPDATE identity_admin_idempotency_keys")) return { rowCount: 1, rows: [] };
@@ -57,4 +57,22 @@ test("audit failure rolls back role grant", async () => {
   assert.equal(result.status, 500);
   assert.ok(state.queries.some(q => q.sql === "ROLLBACK"));
   assert.equal(state.committed, false);
+});
+
+test("idempotency keys longer than the audit ledger limit are rejected before database access", async () => {
+  const { pool, state } = createPool();
+  const result = await manageMembershipRole({
+    pool, ...base, action: "grant", idempotencyKey: "x".repeat(161)
+  });
+  assert.equal(result.status, 400);
+  assert.equal(result.body.code, "IDEMPOTENCY_KEY_REQUIRED");
+  assert.equal(state.queries.length, 0);
+});
+
+test("role catalog lookup binds the requested role key", async () => {
+  const { pool, state } = createPool();
+  const result = await manageMembershipRole({ pool, ...base, action: "grant" });
+  assert.equal(result.status, 200);
+  const roleLookup = state.queries.find(q => q.sql.includes("SELECT role_key"));
+  assert.deepEqual(roleLookup.params, ["order-creator"]);
 });
