@@ -1,5 +1,11 @@
 # Order API Integration Test Plan
 
+## Current CI evidence (2026-10-11)
+
+The repository currently runs a PostgreSQL-backed HTTP-to-database integration test in CI for order creation. That test covers a successful draft order, replay of the same idempotency key and request, request-fingerprint conflict, rejection of a cross-tenant product, duplicate order-number rejection, and persisted counts for the order, line, audit event, and idempotency record. See [the integration test](../test/order.integration.test.mjs) and [the CI workflow](../.github/workflows/ci.yml).
+
+This is partial coverage, not completion of the entire matrix below. Keep each unchecked acceptance item open until an executable test proves it against the current code and disposable PostgreSQL database.
+
 ## Objective
 
 Extend the current API unit tests and migration smoke checks with repeatable PostgreSQL-backed tests for order creation. The current CI applies migrations to a disposable PostgreSQL instance but does not yet exercise the complete HTTP-to-database transaction path.
