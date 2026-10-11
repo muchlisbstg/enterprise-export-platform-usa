@@ -6,7 +6,7 @@ This document is a proposed engineering checklist for the Enterprise Export Plat
 
 ## 1. Repository and change governance
 
-- [ ] Set repository visibility to private if that remains the intended access policy; verify the setting after changing it.
+- [x] Repository visibility was verified as public on 2026-10-11 and is intentionally unchanged per the current owner instruction. Reassess visibility separately only if the access policy changes.
 - [ ] Protect `main`: require pull requests, required reviews, and passing required checks before merge.
 - [ ] Restrict force pushes and branch deletion on protected branches.
 - [ ] Define who may approve security-sensitive changes and who may deploy to each environment.
