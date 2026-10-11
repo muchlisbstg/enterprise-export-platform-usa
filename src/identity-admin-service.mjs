@@ -23,8 +23,9 @@ export async function manageMembershipRole({
   }
   if (actor.id === targetUserId) return fail(403, "SELF_ROLE_CHANGE_DENIED", "Self role changes are not permitted");
   if (!ASSIGNABLE_ROLES.has(roleKey)) return fail(400, "ROLE_NOT_ASSIGNABLE", "Role is not in the assignable role catalog");
-  if (typeof idempotencyKey !== "string" || idempotencyKey.trim().length < 8 || idempotencyKey.length > 200) {
-    return fail(400, "IDEMPOTENCY_KEY_REQUIRED", "Provide an Idempotency-Key between 8 and 200 characters");
+  // identity_audit_events.request_key has a 160-character database limit.
+  if (typeof idempotencyKey !== "string" || idempotencyKey.trim().length < 8 || idempotencyKey.length > 160) {
+    return fail(400, "IDEMPOTENCY_KEY_REQUIRED", "Provide an Idempotency-Key between 8 and 160 characters");
   }
 
   const requestHash = createHash("sha256").update(JSON.stringify({ action, targetUserId, roleKey })).digest("hex");
