@@ -80,6 +80,8 @@ jobs:
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/007_identity_admin_permissions.sql
       - name: Run PostgreSQL-backed order integration tests
         run: DATABASE_URL=postgresql://app:test-only-password@localhost:5432/export_platform_test npm run test:integration
+      - name: Run PostgreSQL-backed identity admin integration tests
+        run: DATABASE_URL=postgresql://app:test-only-password@localhost:5432/export_platform_test node --test test/identity-admin.integration.test.mjs
       - name: Run identity schema integration tests
         run: DATABASE_URL=postgresql://app:test-only-password@localhost:5432/export_platform_test node --test test/identity.integration.test.mjs
       - name: Run authorization catalog integration tests
