@@ -96,6 +96,25 @@ test("identity role administration persists grant/revoke, idempotency, tenant bo
     );
     assert.equal(afterRevoke.rows[0].count, 0);
 
+    const concurrentKey = "concurrent-" + suffix;
+    const concurrentRequest = base({
+      roleKey: "order-submitter",
+      idempotencyKey: concurrentKey,
+      correlationId: randomUUID()
+    });
+    const concurrentResults = await Promise.all([
+      manageMembershipRole(concurrentRequest),
+      manageMembershipRole(concurrentRequest)
+    ]);
+    assert.deepEqual(concurrentResults.map((result) => result.status), [200, 200]);
+    assert.equal(concurrentResults.filter((result) => result.headers?.["idempotency-replayed"] === "true").length, 1);
+    assert.equal(concurrentResults.filter((result) => result.body.item.changed === true).length, 1);
+    const concurrentAudit = await pool.query(
+      "SELECT count(*)::int AS count FROM identity_audit_events WHERE organization_id = $1 AND request_key = $2",
+      [orgA, concurrentKey]
+    );
+    assert.equal(concurrentAudit.rows[0].count, 1);
+
     const auditRows = await pool.query(
       "SELECT action, decision FROM identity_audit_events WHERE organization_id = $1 AND request_key IN ($2, $3) ORDER BY action",
       [orgA, "identity-admin-" + suffix, "identity-revoke-" + suffix]
