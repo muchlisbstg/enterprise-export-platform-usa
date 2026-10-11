@@ -40,6 +40,7 @@ jobs:
           test -s database/migrations/004_authorization_catalog.sql
           test -s database/migrations/005_order_transition_audit.sql
           test -s database/migrations/006_identity_audit_ledger.sql
+          test -s database/migrations/007_identity_admin_permissions.sql
           test -s docs/ARCHITECTURE.md
           test -s docs/MVP_BACKLOG.md
           test -s docs/IDENTITY_AND_AUTHORIZATION_FOUNDATION.md
@@ -56,6 +57,8 @@ jobs:
           test -s test/authorization-catalog.integration.test.mjs
           test -s test/order-transition.integration.test.mjs
           test -s test/identity-audit.integration.test.mjs
+          test -s test/identity-admin-service.test.mjs
+          test -s src/identity-admin-service.mjs
           test -s src/order-transition-service.mjs
           test -s src/order-lifecycle.mjs
       - name: Set up Node.js
@@ -74,6 +77,7 @@ jobs:
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/004_authorization_catalog.sql
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/005_order_transition_audit.sql
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/006_identity_audit_ledger.sql
+          psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -f database/migrations/007_identity_admin_permissions.sql
       - name: Run PostgreSQL-backed order integration tests
         run: DATABASE_URL=postgresql://app:test-only-password@localhost:5432/export_platform_test npm run test:integration
       - name: Run identity schema integration tests
@@ -86,9 +90,10 @@ jobs:
         run: DATABASE_URL=postgresql://app:test-only-password@localhost:5432/export_platform_test node --test test/identity-audit.integration.test.mjs
       - name: Verify expected tables and tenant-scoped constraints
         run: |
-          psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.organizations'), to_regclass('public.parties'), to_regclass('public.products'), to_regclass('public.orders'), to_regclass('public.order_lines'), to_regclass('public.audit_events'), to_regclass('public.order_idempotency_keys'), to_regclass('public.app_users'), to_regclass('public.organization_memberships'), to_regclass('public.authorization_roles'), to_regclass('public.authorization_permissions'), to_regclass('public.authorization_role_permissions'), to_regclass('public.organization_membership_roles'), to_regclass('public.identity_audit_events');" | tee /tmp/schema-check.txt
+          psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.organizations'), to_regclass('public.parties'), to_regclass('public.products'), to_regclass('public.orders'), to_regclass('public.order_lines'), to_regclass('public.audit_events'), to_regclass('public.order_idempotency_keys'), to_regclass('public.app_users'), to_regclass('public.organization_memberships'), to_regclass('public.authorization_roles'), to_regclass('public.authorization_permissions'), to_regclass('public.authorization_role_permissions'), to_regclass('public.organization_membership_roles'), to_regclass('public.identity_audit_events'), to_regclass('public.identity_admin_idempotency_keys');" | tee /tmp/schema-check.txt
           grep -q "audit_events" /tmp/schema-check.txt
           grep -q "app_users" /tmp/schema-check.txt
           grep -q "organization_membership_roles" /tmp/schema-check.txt
           grep -q "identity_audit_events" /tmp/schema-check.txt
+          grep -q "identity_admin_idempotency_keys" /tmp/schema-check.txt
           psql -h localhost -U app -d export_platform_test -v ON_ERROR_STOP=1 -c "SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_type = 'FOREIGN KEY' AND table_schema = 'public';" | grep -Eq '[1-9][0-9]*'
