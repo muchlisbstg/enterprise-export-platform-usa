@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { transitionOrder } from "./order-transition-service.mjs";
+import { manageMembershipRole } from "./identity-admin-service.mjs";
 
 const allowedOrderStatuses = new Set([
   "draft", "submitted", "approved", "rejected", "cancelled", "fulfilled"
@@ -118,6 +119,55 @@ export function createHandler({ pool, token, organizationId, authenticate, resol
       const authorization = req.headers.authorization ?? "";
       if (authorization !== `Bearer ${token}`) {
         return sendJson(res, 401, { code: "UNAUTHORIZED", message: "Missing or invalid bearer token", correlationId });
+      }
+    }
+
+    const identityRoleMatch = /^\/api\/v1\/memberships\/([^/]+)\/roles$/.exec(url.pathname);
+    if (req.method === "POST" && identityRoleMatch) {
+      if (!requestActorId) {
+        return sendJson(res, 403, { code: "FORBIDDEN", message: "A verified user identity is required", correlationId });
+      }
+      if (!UUID_RE.test(identityRoleMatch[1])) {
+        return sendJson(res, 400, { code: "VALIDATION_ERROR", message: "Membership user ID must be a UUID", correlationId });
+      }
+      const contentType = req.headers["content-type"] ?? "";
+      if (!contentType.toLowerCase().startsWith("application/json")) {
+        return sendJson(res, 415, { code: "UNSUPPORTED_MEDIA_TYPE", message: "Content-Type must be application/json", correlationId });
+      }
+      const idempotencyKey = req.headers["idempotency-key"];
+      if (typeof idempotencyKey !== "string" || idempotencyKey.trim().length < 8 || idempotencyKey.length > 160) {
+        return sendJson(res, 400, { code: "IDEMPOTENCY_KEY_REQUIRED", message: "Provide an Idempotency-Key between 8 and 160 characters", correlationId });
+      }
+      let body;
+      try {
+        body = await readJson(req);
+      } catch (error) {
+        const tooLarge = error.code === "BODY_TOO_LARGE";
+        return sendJson(res, tooLarge ? 413 : 400, {
+          code: tooLarge ? "BODY_TOO_LARGE" : "INVALID_JSON",
+          message: tooLarge ? "Request body exceeds 64 KiB" : "Request body must be valid JSON",
+          correlationId
+        });
+      }
+      if (!body || typeof body !== "object" || Array.isArray(body) ||
+          Object.keys(body).length !== 2 || !Object.hasOwn(body, "action") || !Object.hasOwn(body, "roleKey") ||
+          typeof body.action !== "string" || typeof body.roleKey !== "string") {
+        return sendJson(res, 400, { code: "VALIDATION_ERROR", message: "Body must contain only action and roleKey strings", correlationId });
+      }
+      try {
+        const result = await manageMembershipRole({
+          pool,
+          actor: { id: requestActorId, organizationId: requestOrganizationId, permissions: [...permissions] },
+          organizationId: requestOrganizationId,
+          targetUserId: identityRoleMatch[1],
+          roleKey: body.roleKey,
+          action: body.action,
+          idempotencyKey,
+          correlationId
+        });
+        return sendJson(res, result.status, result.body, result.headers ?? {});
+      } catch {
+        return sendJson(res, 500, { code: "INTERNAL_ERROR", message: "Role administration could not be completed", correlationId });
       }
     }
 
