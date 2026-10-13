@@ -154,17 +154,21 @@ export function createHandler({ pool, token, organizationId, authenticate, resol
           typeof body.action !== "string" || typeof body.roleKey !== "string") {
         return sendJson(res, 400, { code: "VALIDATION_ERROR", message: "Body must contain only action and roleKey strings", correlationId });
       }
-      const result = await manageMembershipRole({
-        pool,
-        actor: { id: requestActorId, organizationId: requestOrganizationId, permissions: [...permissions] },
-        organizationId: requestOrganizationId,
-        targetUserId: identityRoleMatch[1],
-        roleKey: body.roleKey,
-        action: body.action,
-        idempotencyKey,
-        correlationId
-      });
-      return sendJson(res, result.status, result.body, result.headers ?? {});
+      try {
+        const result = await manageMembershipRole({
+          pool,
+          actor: { id: requestActorId, organizationId: requestOrganizationId, permissions: [...permissions] },
+          organizationId: requestOrganizationId,
+          targetUserId: identityRoleMatch[1],
+          roleKey: body.roleKey,
+          action: body.action,
+          idempotencyKey,
+          correlationId
+        });
+        return sendJson(res, result.status, result.body, result.headers ?? {});
+      } catch {
+        return sendJson(res, 500, { code: "INTERNAL_ERROR", message: "Role administration could not be completed", correlationId });
+      }
     }
 
     const transitionSegments = url.pathname.split("/");
