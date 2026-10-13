@@ -117,6 +117,40 @@ test("identity role administration persists grant/revoke, idempotency, tenant bo
     );
     assert.equal(concurrentAudit.rows[0].count, 1);
 
+    // Force the audit insert to fail via the ledger's tenant-scoped unique request_key.
+    // The role mutation and idempotency reservation must roll back with it.
+    const rollbackKey = "audit-rollback-" + suffix;
+    const rollbackCorrelationId = randomUUID();
+    await pool.query(
+      `INSERT INTO identity_audit_events
+         (organization_id, correlation_id, request_key, actor_user_id, target_user_id, action, decision, role_key, metadata)
+       VALUES ($1, $2, $3, $4, $5, 'role.grant', 'allowed', $6, $7::jsonb)`,
+      [orgA, rollbackCorrelationId, rollbackKey, actorId, targetId, "order-approver", JSON.stringify({ fixture: "force-audit-conflict" })]
+    );
+    const rollbackResult = await manageMembershipRole(base({
+      roleKey: "order-approver",
+      idempotencyKey: rollbackKey,
+      correlationId: randomUUID()
+    }));
+    assert.equal(rollbackResult.status, 500);
+    assert.equal(rollbackResult.body.code, "INTERNAL_ERROR");
+
+    const rolledBackAssignment = await pool.query(
+      "SELECT count(*)::int AS count FROM organization_membership_roles WHERE organization_id = $1 AND user_id = $2 AND role_key = $3",
+      [orgA, targetId, "order-approver"]
+    );
+    assert.equal(rolledBackAssignment.rows[0].count, 0);
+    const rolledBackIdempotency = await pool.query(
+      "SELECT count(*)::int AS count FROM identity_admin_idempotency_keys WHERE organization_id = $1 AND idempotency_key = $2",
+      [orgA, rollbackKey]
+    );
+    assert.equal(rolledBackIdempotency.rows[0].count, 0);
+    const preservedAuditFixture = await pool.query(
+      "SELECT count(*)::int AS count FROM identity_audit_events WHERE organization_id = $1 AND request_key = $2",
+      [orgA, rollbackKey]
+    );
+    assert.equal(preservedAuditFixture.rows[0].count, 1);
+
     const auditRows = await pool.query(
       "SELECT action, decision FROM identity_audit_events WHERE organization_id = $1 AND request_key IN ($2, $3) ORDER BY action",
       [orgA, "identity-admin-" + suffix, "identity-revoke-" + suffix]
