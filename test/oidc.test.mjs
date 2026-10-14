@@ -96,3 +96,73 @@ test("OIDC authenticator verifies a signed JWT and rejects wrong audience, issue
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 });
+
+
+test("OIDC authenticator rejects tokens that are not yet valid", async () => {
+  const { createServer } = await import("node:http");
+  const { generateKeyPair, exportJWK, SignJWT } = await import("jose");
+  const { publicKey, privateKey } = await generateKeyPair("RS256");
+  const jwk = await exportJWK(publicKey);
+  jwk.kid = "not-before-test-key";
+  jwk.alg = "RS256";
+  jwk.use = "sig";
+  const server = createServer((req, res) => {
+    res.writeHead(req.url === "/keys" ? 200 : 404, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(req.url === "/keys" ? JSON.stringify({ keys: [jwk] }) : "");
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const issuer = "http://127.0.0.1:" + server.address().port;
+  try {
+    const authenticate = await createOidcAuthenticator({
+      issuer,
+      audience: "export-api",
+      fetchImpl: async () => response({ issuer, jwks_uri: issuer + "/keys" })
+    });
+    const token = await new SignJWT({})
+      .setProtectedHeader({ alg: "RS256", kid: jwk.kid })
+      .setIssuer(issuer)
+      .setAudience("export-api")
+      .setSubject("subject-123")
+      .setIssuedAt()
+      .setNotBefore(Math.floor(Date.now() / 1000) + 120)
+      .setExpirationTime(Math.floor(Date.now() / 1000) + 300)
+      .sign(privateKey);
+    assert.equal(await authenticate({ headers: { authorization: "Bearer " + token } }), null);
+  } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test("OIDC authenticator rejects tokens signed with an unsupported algorithm", async () => {
+  const { createServer } = await import("node:http");
+  const { generateKeyPair, exportJWK, SignJWT } = await import("jose");
+  const { publicKey, privateKey } = await generateKeyPair("RS256");
+  const jwk = await exportJWK(publicKey);
+  jwk.kid = "algorithm-test-key";
+  jwk.alg = "RS256";
+  jwk.use = "sig";
+  const server = createServer((req, res) => {
+    res.writeHead(req.url === "/keys" ? 200 : 404, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(req.url === "/keys" ? JSON.stringify({ keys: [jwk] }) : "");
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const issuer = "http://127.0.0.1:" + server.address().port;
+  try {
+    const authenticate = await createOidcAuthenticator({
+      issuer,
+      audience: "export-api",
+      fetchImpl: async () => response({ issuer, jwks_uri: issuer + "/keys" })
+    });
+    const token = await new SignJWT({})
+      .setProtectedHeader({ alg: "HS256", kid: jwk.kid })
+      .setIssuer(issuer)
+      .setAudience("export-api")
+      .setSubject("subject-123")
+      .setIssuedAt()
+      .setExpirationTime(Math.floor(Date.now() / 1000) + 60)
+      .sign(new TextEncoder().encode("not-the-rsa-key"));
+    assert.equal(await authenticate({ headers: { authorization: "Bearer " + token } }), null);
+  } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
